@@ -35,3 +35,18 @@ func (c customerService) Index(ctx context.Context) ([]dto.CustomerData, error) 
 	}
 	return customerData, nil
 }
+
+func (c customerService) FindByID(ctx context.Context, id string) (dto.CustomerData, error) {
+	customer, err := c.customerRepository.FindByID(ctx, id)
+	if err != nil {
+		return dto.CustomerData{}, err
+	}
+	return dto.CustomerData{
+		ID:      customer.ID,
+		Code:    customer.Code,
+		Name:    customer.Name,
+		Email:   customer.Email,
+		Address: customer.Address,
+		Phone:   customer.Phone,
+	}, nil
+}

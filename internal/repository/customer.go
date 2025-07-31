@@ -42,7 +42,7 @@ func (cr *customerRepository) Delete(ctx context.Context, id string) error {
 // FindAll implements domain.CustomerRepository.
 func (cr *customerRepository) FindAll(ctx context.Context) (result []domain.Customer, err error) {
 	dataset := cr.db.From("customers").Where(goqu.C("deleted_at").IsNull())
-	err = dataset.ScanStructsContext(ctx, result)
+	err = dataset.ScanStructsContext(ctx, &result)
 	return
 }
 

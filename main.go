@@ -21,15 +21,12 @@ func main() {
 
 	api.NewCustomer(app, customerService)
 
-	app.Get("/", func(ctx *fiber.Ctx) error {
-		return ctx.JSON("Hello, World!")
-	})
-	app.Get("/developers", func(ctx *fiber.Ctx) error {
-		return ctx.JSON("Hello, developers!")
-	})
-	_ = app.Listen(cnf.Server.Host + ":" + cnf.Server.Port)
-}
+	// app.Get("/", func(ctx *fiber.Ctx) error {
+	// 	return ctx.JSON("Hello, World!")
+	// })
+	// app.Get("/developers", func(ctx *fiber.Ctx) error {
+	// 	return ctx.JSON("Hello, developers!")
+	// })
 
-func developers(ctx *fiber.Ctx) error {
-	return ctx.SendString("Hello, World!")
+	_ = app.Listen(cnf.Server.Host + ":" + cnf.Server.Port)
 }

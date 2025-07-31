@@ -11,10 +11,10 @@ type Server struct {
 }
 
 type Database struct {
-	Host string
-	Port string
-	Name string
-	User string
-	Pass string
-	Tz   string
+	Host string `env:"DB_HOST"`
+	Port string `env:"DB_PORT"`
+	Name string `env:"DB_NAME"`
+	User string `env:"DB_USER"`
+	Pass string `env:"DB_PASS"`
+	Tz   string `env:"DB_TZ"`
 }

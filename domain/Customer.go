@@ -28,4 +28,5 @@ type CustomerRepository interface {
 
 type CustomerService interface {
 	Index(ctx context.Context) ([]dto.CustomerData, error)
+	FindByID(ctx context.Context, id string) (dto.CustomerData, error)
 }
