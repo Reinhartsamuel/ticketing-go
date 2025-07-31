@@ -2,7 +2,7 @@ package main
 
 import (
 	"Repos/ticketing-go/migrations"
-	"Repos/ticketing-go/models"
+	"Repos/ticketing-go/routes"
 	"Repos/ticketing-go/storage"
 	"log"
 	"os"
@@ -18,75 +18,14 @@ type Repository struct {
 }
 
 func (r *Repository) SetupRoutes(app *fiber.App) {
-	app.Post("/merchants", r.CreateMerchant)
-	app.Get("/merchants", r.GetMerchants)
-	app.Get("/merchants/:id", r.GetMerchantByID)
-	app.Put("/merchants/:id", r.UpdateMerchant)
-}
-
-func (r *Repository) CreateMerchant(c *fiber.Ctx) error {
-	merchant := models.Merchant{}
-	err := c.BodyParser(&merchant)
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "Invalid request body",
-		})
-	}
-	err = r.DB.Create(&merchant).Error
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"message": "Failed to create merchant",
-		})
-	}
-	return c.Status(fiber.StatusOK).JSON(&fiber.Map{
-		"message": "Merchant created successfully",
-	})
-}
-
-func (r *Repository) GetMerchants(c *fiber.Ctx) error {
-	merchant := models.Merchant{}
-	err := r.DB.First(&merchant).Error
-	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error":   err.Error(),
-			"message": "Merchant not found",
-		})
-	}
-	return c.Status(fiber.StatusOK).JSON(&fiber.Map{
-		"merchant": merchant,
-	})
-}
-
-func (r *Repository) GetMerchantByID(c *fiber.Ctx) error {
-	merchant := models.Merchant{}
-	err := r.DB.First(&merchant, c.Params("id")).Error
-	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"message": "Merchant not found",
-		})
-	}
-	return c.Status(fiber.StatusOK).JSON(&fiber.Map{
-		"merchant": merchant,
-	})
-}
-
-func (r *Repository) UpdateMerchant(c *fiber.Ctx) error {
-	merchant := models.Merchant{}
-	err := c.BodyParser(&merchant)
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "Invalid request body",
-		})
-	}
-	err = r.DB.Save(&merchant).Error
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"message": "Failed to update merchant",
-		})
-	}
-	return c.Status(fiber.StatusOK).JSON(&fiber.Map{
-		"message": "Merchant updated successfully",
-	})
+	// Initialize route handlers
+	merchantRoutes := &routes.MerchantRoutes{DB: r.DB}
+	customerRoutes := &routes.CustomerRoutes{DB: r.DB}
+	
+	// Setup routes
+	merchantRoutes.SetupRoutes(app)
+	customerRoutes.SetupRoutes(app)
+	// Add other route handlers here (TicketRoutes, etc.)
 }
 
 func main() {
