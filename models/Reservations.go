@@ -7,9 +7,9 @@ import (
 )
 
 type Reservation struct {
-	ID              string `gorm:"primaryKey"`
-	UserID          uint
-	EventID         string
+	ID              uint           `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID          uint           `json:"user_id"`
+	EventID         uint           `json:"event_id"`
 	PaymentStatus   string         `json:"payment_status" gorm:"default:PENDING"`
 	TransactionHash string         `json:"transaction_hash"`
 	TransactionUrl  string         `json:"transaction_url"`

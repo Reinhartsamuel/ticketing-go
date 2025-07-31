@@ -17,7 +17,7 @@ func (e *EventRoutes) SetupRoutes(app *fiber.App) {
 	app.Post("/events", e.CreateEvent)
 	app.Get("/events", e.GetEvents)
 	app.Get("/events/:id", e.GetEventByID)
-	app.Put("/events/:id", e.UpdateEvent)
+	app.Patch("/events/:id", e.UpdateEvent)
 }
 
 func (e *EventRoutes) CreateEvent(c *fiber.Ctx) error {

@@ -17,7 +17,7 @@ func (r *ReservationRoutes) SetupRoutes(app *fiber.App) {
 	app.Post("/reservations", r.CreateReservation)
 	app.Get("/reservations", r.GetReservations)
 	app.Get("/reservations/:id", r.GetReservationByID)
-	app.Put("/reservations/:id", r.UpdateReservation)
+	app.Patch("/reservations/:id", r.UpdateReservation)
 }
 
 func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {

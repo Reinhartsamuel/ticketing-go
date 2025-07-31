@@ -21,11 +21,14 @@ func (r *Repository) SetupRoutes(app *fiber.App) {
 	// Initialize route handlers
 	merchantRoutes := &routes.MerchantRoutes{DB: r.DB}
 	customerRoutes := &routes.CustomerRoutes{DB: r.DB}
-	
+	eventRoutes := &routes.EventRoutes{DB: r.DB}
+	reservationRoutes := &routes.ReservationRoutes{DB: r.DB}
+
 	// Setup routes
 	merchantRoutes.SetupRoutes(app)
 	customerRoutes.SetupRoutes(app)
-	// Add other route handlers here (TicketRoutes, etc.)
+	eventRoutes.SetupRoutes(app)
+	reservationRoutes.SetupRoutes(app)
 }
 
 func main() {

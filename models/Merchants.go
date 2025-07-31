@@ -7,7 +7,7 @@ import (
 )
 
 type Merchant struct {
-	ID              uint           `gorm:"primarykey;autoIncrement:true" json:"id"`
+	ID              uint           `gorm:"primaryKey;autoIncrement" json:"id"`
 	MerchantOwnerID uint           `json:"merchant_owner_id"`
 	MerchantName    string         `json:"merchant_name"`
 	MerchantWallet  string         `json:"merchant_wallet"`

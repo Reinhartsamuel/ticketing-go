@@ -17,7 +17,7 @@ func (m *MerchantRoutes) SetupRoutes(app *fiber.App) {
 	app.Post("/merchants", m.CreateMerchant)
 	app.Get("/merchants", m.GetMerchants)
 	app.Get("/merchants/:id", m.GetMerchantByID)
-	app.Put("/merchants/:id", m.UpdateMerchant)
+	app.Patch("/merchants/:id", m.UpdateMerchant)
 	app.Delete("/merchants/:id", m.DeleteMerchant)
 }
 
