@@ -2,6 +2,8 @@ package routes
 
 import (
 	"Repos/ticketing-go/models"
+	"fmt"
+	"reflect"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -25,7 +27,24 @@ func (cr *CustomerRoutes) CreateCustomer(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"message": "Invalid request body",
+			"error":   err.Error(),
 		})
+	}
+
+	// Dynamic validation
+	requiredFields := map[string]string{
+		"CustomerName":   "customer name",
+		"CustomerWallet": "customer wallet",
+		"CustomerType":   "customer type",
+	}
+
+	for field, displayName := range requiredFields {
+		val := reflect.ValueOf(customer).FieldByName(field)
+		if val.Kind() == reflect.String && val.String() == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": fmt.Sprintf("%s is required", displayName),
+			})
+		}
 	}
 	err = cr.DB.Create(&customer).Error
 	if err != nil {
