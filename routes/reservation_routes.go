@@ -3,10 +3,10 @@ package routes
 import (
 	"Repos/ticketing-go/models"
 	"fmt"
-	"reflect"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ReservationRoutes struct {
@@ -21,41 +21,95 @@ func (r *ReservationRoutes) SetupRoutes(app *fiber.App) {
 }
 
 func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
-	reservation := models.Reservation{}
-	err := c.BodyParser(&reservation)
-	if err != nil {
+	type ReservationRequest struct {
+		UserID    uint `json:"user_id"`
+		EventID   uint `json:"event_id"`
+		TicketQty int  `json:"ticket_qty"`
+	}
+
+	req := ReservationRequest{}
+	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"message": "Invalid request body",
 			"error":   err.Error(),
 		})
 	}
 
-	requiredFields := map[string]string{
-		"UserID":  "user ID",
-		"EventID": "event ID",
+	// validate input!!
+	if req.UserID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "User ID is required",
+		})
+	}
+	if req.EventID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Event ID is required",
+		})
+	}
+	if req.TicketQty <= 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Ticket quantity must be greater than 0",
+		})
 	}
 
-	for field, displayName := range requiredFields {
-		val := reflect.ValueOf(reservation).FieldByName(field)
-		if (val.Kind() == reflect.String && val.String() == "") ||
-			(val.Kind() == reflect.Uint && val.Uint() == 0) {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": fmt.Sprintf("%s is required", displayName),
+	// Begin a transaction
+	err := r.DB.Transaction(func(tx *gorm.DB) error {
+		event := models.Event{}
+
+		// Lock the event row FOR UPDATE (row-level lock) =>>>>>prevent race condition
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", req.EventID).
+			First(&event).Error; err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"message": "Event not found",
 			})
 		}
-	}
 
-	err = r.DB.Create(&reservation).Error
+		// Check if there's enough ticket quota
+		if event.EventTicketAmount < req.TicketQty {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": fmt.Sprintf("Not enough tickets available. Only %d left.", event.EventTicketAmount),
+			})
+		}
+
+		// Decrement quota ----- put it as hold in PENDING reservation
+		event.EventTicketAmount -= req.TicketQty
+		if err := tx.Save(&event).Error; err != nil {
+			return fmt.Errorf("failed to update ticket quota: %w", err)
+		}
+
+		// Create reservation with PENDING status
+		reservation := models.Reservation{
+			UserID:        req.UserID,
+			EventID:       req.EventID,
+			PaymentStatus: "PENDING",
+		}
+		if err := tx.Create(&reservation).Error; err != nil {
+			return fmt.Errorf("failed to create reservation: %w", err)
+		}
+
+		// Everything succeeded — commit transaction
+		c.Status(fiber.StatusCreated).JSON(fiber.Map{
+			"message":     "Reservation created and ticket quota held",
+			"reservation": reservation,
+		})
+		return nil
+	})
+
+	// If error came from tx rollback
 	if err != nil {
+		// Already responded from within transaction if it's Fiber-compatible
+		if err, ok := err.(*fiber.Error); ok {
+			return err
+		}
+		// Otherwise, return generic error
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"message": "Failed to create reservation",
+			"message": "Transaction failed",
 			"error":   err.Error(),
 		})
 	}
-	return c.Status(fiber.StatusCreated).JSON(&fiber.Map{
-		"message":     "Reservation created successfully",
-		"reservation": reservation,
-	})
+
+	return nil // handled inside tx
 }
 
 func (r *ReservationRoutes) GetReservations(c *fiber.Ctx) error {

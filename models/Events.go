@@ -14,7 +14,7 @@ type Event struct {
 	EventVenue        string         `json:"event_venue"`
 	EventGeolocation  string         `json:"event_geolocation"`
 	EventDescription  string         `json:"event_description"`
-	MerchantID        string         `json:"merchant_id"`
+	MerchantID        uint           `json:"merchant_id"`
 	EventTicketPrice  float64        `json:"event_ticket_price"`
 	EventTicketAmount int            `json:"event_ticket_amount"`
 	CreatedAt         time.Time      `json:"created_at"`

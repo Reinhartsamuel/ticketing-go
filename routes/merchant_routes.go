@@ -96,7 +96,15 @@ func (m *MerchantRoutes) UpdateMerchant(c *fiber.Ctx) error {
 			"message": "Invalid request body",
 		})
 	}
-	err = m.DB.Save(&merchant).Error
+	// check if merchant exists
+	var existingMerchant models.Merchant
+	err = m.DB.First(&existingMerchant, c.Params("id")).Error
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"message": "Merchant not found",
+		})
+	}
+	err = m.DB.Model(&existingMerchant).Updates(&merchant).Error
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"message": "Failed to update merchant",
