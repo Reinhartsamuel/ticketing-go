@@ -125,6 +125,7 @@ func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
 			PaymentDue:       time.Now().Add(1 * time.Hour),
 			PaymentAmountUsd: float64(req.TicketQty) * priceUsd,       // assuming Event.PriceUsd exists
 			PaymentAmountIdr: float64(req.TicketQty) * event.PriceIdr, // assuming Event.PriceIdr exists
+			MerchantWallet:   merchant.MerchantWallet,
 		}
 
 		if err := tx.Create(&reservation).Error; err != nil {

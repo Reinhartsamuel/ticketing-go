@@ -1,0 +1,119 @@
+package helpers
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"math/big"
+	"strings"
+
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
+)
+
+// USDT Contract configuration
+var (
+	USDTContractAddress = "0xCD60747D9Bbb1da2AfB2F834391f0FF6ccb15f1a"
+	// BSC_WSS_URL         = os.Getenv("BSC_WSS_URL")
+	BSC_WSS_URL = "wss://bnb-testnet.g.alchemy.com/v2/51MRDeFHeLtd5FrWrTMv0bsusLfs5n8r"
+)
+
+// TransferEventABI is the ABI fragment for Transfer event
+const TransferEventABI = `[
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"name": "value",
+				"type": "uint256"
+			}
+		],
+		"name": "Deposit",
+		"type": "event"
+	}
+]`
+
+func init() {
+	if BSC_WSS_URL == "" {
+		log.Fatal("WSS URL must be set via environment variables")
+	}
+}
+
+func StartListener() {
+	// Connect to Arbitrum via WebSocket
+	client, err := ethclient.Dial(BSC_WSS_URL)
+	if err != nil {
+		log.Fatal("Failed to connect to the client:", err)
+	}
+	defer client.Close()
+
+	// Parse the ABI
+	parsedABI, err := abi.JSON(strings.NewReader(TransferEventABI))
+	if err != nil {
+		log.Fatal("Failed to parse ABI:", err)
+	}
+
+	// Get the event signature (topic0)
+	eventSig := parsedABI.Events["Transfer"].ID // keccak256("Transfer(address,address,uint256)")
+
+	// Target address (your wallet)
+
+	// Create query filter: only Transfer events where 'to' == targetAddress
+	// Filter for one recipient (indexed 'to')
+	query := ethereum.FilterQuery{
+		Addresses: []common.Address{common.HexToAddress(USDTContractAddress)},
+		Topics: [][]common.Hash{
+			{eventSig}, // Transfer
+			nil,        // from (wildcard)
+			// {common.HexToHash("0x753dFC03b4d37B3a316D0Fe5aB9F677C0D3C20f8")}, // to
+			nil,
+		},
+	}
+
+	// Subscribe to logs
+	logs := make(chan types.Log)
+	sub, err := client.SubscribeFilterLogs(context.Background(), query, logs)
+	if err != nil {
+		log.Fatal("Failed to subscribe to logs:", err)
+	}
+
+	fmt.Printf("👂 Listening for all USDT transfers...\n")
+
+	// Listen for incoming logs
+	for {
+		select {
+		case err := <-sub.Err():
+			log.Printf("Subscription error: %+v", err)
+		case vLog := <-logs:
+			handleTransferEvent(vLog)
+		}
+	}
+}
+
+func handleTransferEvent(vLog types.Log) {
+	if len(vLog.Topics) < 3 {
+		log.Printf("Invalid log: %+v", vLog)
+		return
+	}
+
+	from := common.HexToAddress(vLog.Topics[1].Hex())
+	to := common.HexToAddress(vLog.Topics[2].Hex())
+
+	// Value is in the data field (not indexed)
+	value := new(big.Int)
+	value.SetBytes(vLog.Data)
+
+	// Format value: USDT has 6 decimals
+	amount := new(big.Float).Quo(new(big.Float).SetInt(value), big.NewFloat(1e6))
+
+	fmt.Printf("✅ Transfer Received!\n")
+	fmt.Printf("   📥 TxHash: %s\n", vLog.TxHash.Hex())
+	fmt.Printf("   🚚 From: %s\n", from.Hex())
+	fmt.Printf("   📦 To: %s\n", to.Hex())
+	fmt.Printf("   💰 Amount: %s USDT\n", amount.Text('f', 6))
+	fmt.Printf("   🔗 Block: %d\n", vLog.BlockNumber)
+}

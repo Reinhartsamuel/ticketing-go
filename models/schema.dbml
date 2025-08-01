@@ -1,0 +1,62 @@
+// Database schema for ticketing-go application
+// Generated from Go models
+
+Table customers {
+  id uint [primary key, increment]
+  code string
+  name string
+  email string
+  address string
+  phone string
+  created_at datetime
+  updated_at datetime
+  deleted_at datetime [null]
+}
+
+Table merchants {
+  id uint [primary key, increment]
+  merchant_owner_id uint
+  merchant_name string
+  merchant_wallet string
+  merchant_type string
+  created_at datetime
+  updated_at datetime
+  deleted_at datetime [null]
+}
+
+Table events {
+  id uint [primary key, increment]
+  event_name string
+  event_date datetime
+  event_time datetime
+  event_venue string
+  event_geolocation string
+  event_description string
+  merchant_id uint
+  price_idr float
+  event_ticket_amount int
+  created_at datetime
+  updated_at datetime
+  deleted_at datetime [null]
+}
+
+Table reservations {
+  id uint [primary key, increment]
+  user_id uint
+  event_id uint
+  payment_status string [default: 'PENDING']
+  payment_amount_usd float [default: 0.0]
+  payment_amount_idr float [default: 0.0]
+  payment_due datetime
+  payment_confirmed_at datetime
+  payment_tx_hash string
+  payment_tx_url string
+  merchant_wallet string
+  created_at datetime
+  updated_at datetime
+  deleted_at datetime [null]
+}
+
+// Relationships
+Ref: merchants.id < events.merchant_id
+Ref: events.id < reservations.event_id
