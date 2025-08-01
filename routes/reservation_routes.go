@@ -2,7 +2,12 @@ package routes
 
 import (
 	"Repos/ticketing-go/models"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -35,28 +40,16 @@ func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
 		})
 	}
 
-	// validate input!!
-	if req.UserID == 0 {
+	// Basic input validation
+	if req.UserID == 0 || req.EventID == 0 || req.TicketQty <= 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "User ID is required",
-		})
-	}
-	if req.EventID == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "Event ID is required",
-		})
-	}
-	if req.TicketQty <= 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "Ticket quantity must be greater than 0",
+			"message": "Missing or invalid user_id, event_id, or ticket_qty",
 		})
 	}
 
-	// Begin a transaction
 	err := r.DB.Transaction(func(tx *gorm.DB) error {
-		event := models.Event{}
-
-		// Lock the event row FOR UPDATE (row-level lock) =>>>>>prevent race condition
+		// Lock the event row FOR UPDATE
+		var event models.Event
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ?", req.EventID).
 			First(&event).Error; err != nil {
@@ -65,51 +58,111 @@ func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
 			})
 		}
 
-		// Check if there's enough ticket quota
-		if event.EventTicketAmount < req.TicketQty {
+		// Validate event timing
+		if event.EventDate.Before(time.Now()) {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": fmt.Sprintf("Not enough tickets available. Only %d left.", event.EventTicketAmount),
+				"message": "Cannot reserve ticket for past events",
 			})
 		}
 
-		// Decrement quota ----- put it as hold in PENDING reservation
-		event.EventTicketAmount -= req.TicketQty
-		if err := tx.Save(&event).Error; err != nil {
-			return fmt.Errorf("failed to update ticket quota: %w", err)
+		// Validate ticket quota
+		if event.EventTicketAmount < req.TicketQty {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": fmt.Sprintf("Only %d tickets left", event.EventTicketAmount),
+			})
 		}
 
-		// Create reservation with PENDING status
-		reservation := models.Reservation{
-			UserID:        req.UserID,
-			EventID:       req.EventID,
-			PaymentStatus: "PENDING",
+		// Deduct ticket amount
+		event.EventTicketAmount -= req.TicketQty
+		if err := tx.Save(&event).Error; err != nil {
+			return fmt.Errorf("failed to update event quota: %w", err)
 		}
+
+		// Fetch merchant wallet from the event
+		var merchant models.Merchant
+		if err := tx.Where("id = ?", event.MerchantID).First(&merchant).Error; err != nil {
+			return fmt.Errorf("failed to fetch merchant: %w", err)
+		}
+
+		// Declare priceUsd variable at function scope
+		var priceUsd float64
+
+		// Fetch and parse exchange rate from EXCHANGERATE API
+		apiKey := os.Getenv("EXCHANGE_RATES_API_KEY")
+		url := fmt.Sprintf("https://v6.exchangerate-api.com/v6/%s/pair/USD/IDR", apiKey)
+		resp, err := http.Get(url)
+		if err != nil {
+			// Fallback to hardcoded rate if API request fails
+			priceUsd = event.PriceIdr / 16500
+		} else {
+			bodyBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				priceUsd = event.PriceIdr / 16500
+			} else {
+				fmt.Println(string(bodyBytes)) // Print actual response content
+
+				var rateData struct {
+					Result         string  `json:"result"`
+					ConversionRate float64 `json:"conversion_rate"`
+				}
+
+				if err := json.Unmarshal(bodyBytes, &rateData); err != nil {
+					fmt.Println("Decode error:", err)
+					priceUsd = event.PriceIdr / 16500
+				} else if rateData.Result != "success" {
+					fmt.Println("API returned non-success result")
+					priceUsd = event.PriceIdr / 16500
+				} else {
+					priceUsd = event.PriceIdr / rateData.ConversionRate
+				}
+			}
+		}
+		// Build reservation
+		reservation := models.Reservation{
+			UserID:           req.UserID,
+			EventID:          req.EventID,
+			PaymentStatus:    "PENDING",
+			PaymentDue:       time.Now().Add(1 * time.Hour),
+			PaymentAmountUsd: float64(req.TicketQty) * priceUsd,       // assuming Event.PriceUsd exists
+			PaymentAmountIdr: float64(req.TicketQty) * event.PriceIdr, // assuming Event.PriceIdr exists
+		}
+
 		if err := tx.Create(&reservation).Error; err != nil {
 			return fmt.Errorf("failed to create reservation: %w", err)
 		}
 
-		// Everything succeeded — commit transaction
+		// Send response including merchant wallet
 		c.Status(fiber.StatusCreated).JSON(fiber.Map{
-			"message":     "Reservation created and ticket quota held",
+			"message":     "Reservation created",
 			"reservation": reservation,
+			// "wallet":      merchant.MerchantWallet,
+			// "network" : "BSC",
+			"payment": fiber.Map{
+				"payment_address": merchant.MerchantWallet,
+				"network":         "BSC",
+				"amount_USDT":     float64(req.TicketQty) * priceUsd,
+				"amount_IDR":      float64(req.TicketQty) * event.PriceIdr,
+				"token":           "USDT",
+				"token_address":   "0xCD60747D9Bbb1da2AfB2F834391f0FF6ccb15f1a",
+				"token_standard":  "BEP20",
+				"chain_id":        97, // BSC testnet
+				"payment_due":     reservation.PaymentDue,
+			},
 		})
 		return nil
 	})
 
-	// If error came from tx rollback
 	if err != nil {
-		// Already responded from within transaction if it's Fiber-compatible
 		if err, ok := err.(*fiber.Error); ok {
 			return err
 		}
-		// Otherwise, return generic error
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"message": "Transaction failed",
 			"error":   err.Error(),
 		})
 	}
 
-	return nil // handled inside tx
+	return nil
 }
 
 func (r *ReservationRoutes) GetReservations(c *fiber.Ctx) error {
