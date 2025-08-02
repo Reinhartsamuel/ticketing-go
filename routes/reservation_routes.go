@@ -26,7 +26,7 @@ func (r *ReservationRoutes) SetupRoutes(app *fiber.App) {
 	app.Get("/reservations", r.GetReservations)
 	app.Get("/reservations/:id", r.GetReservationByID)
 	app.Patch("/reservations/:id", r.UpdateReservation)
-	// app.Post("/reservations/manual-verification", r.ManualVerification)
+	app.Post("/reservations/manual-verification", r.ManualVerification)
 }
 
 func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
