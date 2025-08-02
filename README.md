@@ -34,6 +34,18 @@ The ticketing system is assumed to be some kind of **Ticketing Marketplace**, wh
 
 ![Flowchart](docs/flowchart.png)
 
+## ENV
+```
+DB_HOST=crossover.proxy.rlwy.net
+DB_PORT=19895
+DB_NAME=railway
+DB_USER=postgres
+DB_PASS=NoYbZJXQNODCRWKvmRmeyexLRfvEuadM
+SSL_MODE=disable
+EXCHANGE_RATES_API_KEY=94bb708b5963b2b9ee364fe9
+EXCHANGE_RATE_URL=https://v6.exchangerate-api.com/v6/94bb708b5963b2b9ee364fe9/pair/USD/IDR
+ETHERSCAN_API_KEY=V73FC241WQ8W3R6RR6V3JPCS9XGM8XK7E2
+```
 ## API Reference
 
 #### Create Customer
