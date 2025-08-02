@@ -32,7 +32,7 @@ The ticketing system is assumed to be some kind of **Ticketing Marketplace**, wh
 	    Details to be explained below.
 ---
 
-
+![Flowchart](docs/flowchart.png)
 
 ## API Reference
 
