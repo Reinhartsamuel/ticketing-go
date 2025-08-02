@@ -255,6 +255,29 @@ Before getting started, ensure you have the following installed:
 - [exchangerate-api](https://v6.exchangerate-api.com/v6/94bb708b5963b2b9ee364fe9/pair/USD/IDR)
 - [Git](https://git-scm.com/downloads)
 
+Clone the project
+
+```bash
+  git clone https://github.com/reinhartsulilatu/ticketing-go.git
+```
+
+Go to the project directory
+
+```bash
+  cd ticketing-go
+```
+
+Install dependencies
+
+```bash
+  go mod tidy
+```
+
+Start the server
+
+```bash
+  go run main.go
+```
 
 📧 Email: [reinhartsams@gmail.com]  
 🐦 Twitter: [@reyyn_hart]  
