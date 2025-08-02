@@ -4,6 +4,7 @@ import (
 	"Repos/ticketing-go/models"
 	"context"
 	"log"
+	"math"
 	"math/big"
 	"strings"
 	"time"
@@ -27,6 +28,10 @@ var (
 	rpcURL       = "https://bnb-testnet.g.alchemy.com/v2/51MRDeFHeLtd5FrWrTMv0bsusLfs5n8r"
 	pollInterval = 15 * time.Second
 )
+
+func roundTo6(f float64) float64 {
+	return math.Round(f*1e6) / 1e6
+}
 
 func StartVerificationPoller(db *gorm.DB) {
 	log.Println("🚀 Poller started")
@@ -87,6 +92,7 @@ func StartVerificationPoller(db *gorm.DB) {
 
 				from := common.HexToAddress(vLog.Topics[1].Hex())
 				to := common.HexToAddress(vLog.Topics[2].Hex())
+				txHash := vLog.TxHash.Hex()
 
 				var unpacked []any
 				unpacked, err := parsedABI.Unpack("Transfer", vLog.Data)
@@ -106,16 +112,16 @@ func StartVerificationPoller(db *gorm.DB) {
 				log.Printf("   └─ Amount : %s (raw wei)", amount.String())
 
 				// OPTIONAL: Convert to float if needed
-				// amtFloat := new(big.Float).Quo(new(big.Float).SetInt(&amount), big.NewFloat(1e18))
-				// log.Printf("   └─ Amount : %f USDT", amtFloat)
+				amtFloat := new(big.Float).Quo(new(big.Float).SetInt(amount), big.NewFloat(1e6))
+				log.Printf("   └─ Amount : %f USDT", amtFloat)
 
 				// If you're just testing, comment out DB logic
-				// match, err := CheckExpectedPayment(db, to.Hex(), &amount)
-				// if err != nil {
-				// 	 log.Printf("❌ DB error: %v", err)
-				// } else if match {
-				// 	 log.Printf("✅ Matched expected payment for: %s", to.Hex())
-				// }
+				match, err := CheckExpectedPayment(db, strings.ToLower(from.Hex()), strings.ToLower(to.Hex()), amount, txHash)
+				if err != nil {
+					log.Printf("❌ DB error: %v", err)
+				} else if match {
+					log.Printf("✅ Matched expected payment for: %s", to.Hex())
+				}
 			}
 		}
 
@@ -123,34 +129,60 @@ func StartVerificationPoller(db *gorm.DB) {
 	}
 }
 
-func CheckExpectedPayment(db *gorm.DB, to string, amount *big.Int) (bool, error) {
-	// Do the DB lookup here
-	var count int64
-	err := db.Table("expected_payments").
-		Where("lower(expected_to_address) = lower(?)", to).
-		Where("expected_amount = ?", amount.String()).
-		Where("paid = FALSE AND expires_at > now()").
-		Count(&count).Error
+func CheckExpectedPayment(db *gorm.DB, from string, to string, amount *big.Int, txHash string) (bool, error) {
+	log.Printf("🔍 Checking expected payment: FROM %s → TO %s | AMOUNT (raw): %s", from, to, amount.String())
+
+	// Convert to USDT float, rounded to 6 decimals
+	amtFloat := new(big.Float).Quo(new(big.Float).SetInt(amount), big.NewFloat(1e6))
+	usdRaw, _ := amtFloat.Float64()
+	usdRounded := roundTo6(usdRaw)
+
+	var reservation models.Reservation
+	err := db.
+		Where("lower(customer_wallet) = lower(?)", from).
+		Where("lower(merchant_wallet) = lower(?)", to).
+		Where("ROUND(payment_amount_usd, 6) = ?", usdRounded).
+		Where("payment_status = ?", "PENDING").
+		First(&reservation).Error
 
 	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			log.Println("❌ No matching reservation found")
+			return false, nil
+		}
+		log.Printf("❌ DB query error: %v", err)
 		return false, err
 	}
-	if count > 0 {
-		// mark as paid
-		err := db.Exec(`
-			UPDATE expected_payments
-			SET paid = TRUE, paid_at = now()
-			WHERE lower(expected_to_address) = lower(?)
-				AND expected_amount = ?
-				AND paid = FALSE AND expires_at > now()
-			LIMIT 1
-		`, to, amount.String()).Error
-		if err != nil {
-			return false, err
-		}
-		return true, nil
+
+	// Pretty-print the reservation data
+	log.Println("✅ Matching reservation found:")
+	log.Printf("   ├─ ID               : %d", reservation.ID)
+	log.Printf("   ├─ UserID           : %d", reservation.UserID)
+	log.Printf("   ├─ Amount (USD)     : %.6f", reservation.PaymentAmountUsd)
+	log.Printf("   ├─ Amount (IDR)     : %.2f", reservation.PaymentAmountIdr)
+	log.Printf("   ├─ Customer Wallet  : %s", reservation.CustomerWallet)
+	log.Printf("   ├─ Merchant Wallet  : %s", reservation.MerchantWallet)
+	log.Printf("   ├─ Payment Due      : %s", reservation.PaymentDue)
+	log.Printf("   ├─ Created At       : %s", reservation.CreatedAt)
+	log.Printf("   └─ Payment Status   : %s", reservation.PaymentStatus)
+
+	// Update the reservation to PAID
+	err = db.Exec(`
+	UPDATE reservations
+	SET payment_status = 'PAID',
+	    payment_confirmed_at = now(),
+	    payment_tx_hash = ?,
+	    payment_tx_url = ?
+	WHERE id = ?
+`, txHash, "https://testnet.bscscan.com/tx/"+txHash, reservation.ID).Error
+
+	if err != nil {
+		log.Printf("❌ Failed to update reservation %d to PAID: %v", reservation.ID, err)
+		return false, err
 	}
-	return false, nil
+
+	log.Printf("🎉 Reservation %d marked as PAID", reservation.ID)
+	return true, nil
 }
 
 func StartReservationsPoller(db *gorm.DB) {
@@ -159,7 +191,7 @@ func StartReservationsPoller(db *gorm.DB) {
 	// get all from Reservations table where payment due is passed
 	// payment due <= now()
 	var reservations []models.Reservation
-	err := db.Where("payment_due <= now()").Find(&reservations).Error
+	err := db.Preload("ReservationItems").Where("payment_due <= now() AND payment_status = ?", "PENDING").Find(&reservations).Error
 	if err != nil {
 		log.Printf("❌ Error fetching reservations: %v", err)
 		return
@@ -167,26 +199,27 @@ func StartReservationsPoller(db *gorm.DB) {
 
 	// update record to payment status == EXPIRED and return the hold ticket quota back
 	// to events table
-	// for _, reservation := range reservations {
-	// 	err := db.Model(&reservation).Updates(models.Reservation{
-	// 		PaymentStatus: "EXPIRED",
-	// 	}).Error
-	// 	if err != nil {
-	// 		log.Printf("❌ Error updating reservation: %v", err)
-	// 		continue
-	// 	}
-	// 	// return the hold ticket quota back to events table
-	// 	var event models.Event
-	// 	err = db.First(&event, reservation.EventID).Error
-	// 	if err != nil {
-	// 		log.Printf("❌ Error fetching event: %v", err)
-	// 		continue
-	// 	}
-	// 	event.HoldTicketQuota += 1
-	// 	err = db.Save(&event).Error
-	// 	if err != nil {
-	// 		log.Printf("❌ Error updating event: %v", err)
-	// 		continue
-	// 	}
-	// }
+	for _, reservation := range reservations {
+		err := db.Model(&reservation).Update("payment_status", "EXPIRED").Error
+		if err != nil {
+			log.Printf("❌ Error updating reservation status: %v", err)
+			continue
+		}
+
+		for _, item := range reservation.ReservationItems {
+			var event models.Event
+			err := db.First(&event, item.EventID).Error
+			if err != nil {
+				log.Printf("❌ Error fetching event %d: %v", item.EventID, err)
+				continue
+			}
+
+			event.EventTicketAmount += item.Quantity
+			if err := db.Save(&event).Error; err != nil {
+				log.Printf("❌ Error returning quota for event %d: %v", item.EventID, err)
+				continue
+			}
+			log.Printf("✅ Returned %d tickets back to event %d", item.Quantity, item.EventID)
+		}
+	}
 }

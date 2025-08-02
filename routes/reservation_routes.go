@@ -2,6 +2,7 @@ package routes
 
 import (
 	"Repos/ticketing-go/models"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -23,12 +26,13 @@ func (r *ReservationRoutes) SetupRoutes(app *fiber.App) {
 	app.Get("/reservations", r.GetReservations)
 	app.Get("/reservations/:id", r.GetReservationByID)
 	app.Patch("/reservations/:id", r.UpdateReservation)
+	// app.Post("/reservations/manual-verification", r.ManualVerification)
 }
 
 func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
 	type ReservationItemRequest struct {
 		EventID   uint `json:"event_id"`
-		TicketQty int  `json:"ticket_qty"`
+		TicketQty uint `json:"ticket_qty"`
 	}
 
 	type ReservationRequest struct {
@@ -120,12 +124,12 @@ func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
 				TicketTypeID: 0,
 				Quantity:     uint(i.TicketQty),
 				PriceIdr:     priceIDR,
-				PriceUsd:     priceUSD,
+				PriceUsd:     float64(int64(priceUSD*1000000)) / 1000000, // Limit to 6 decimal places for USDT precision
 			}
 			items = append(items, item)
 
 			totalIDR += priceIDR
-			totalUSD += priceUSD
+			totalUSD += float64(int64(priceUSD*1000000)) / 1000000 // Limit to 6 decimal places for USDT precision
 		}
 
 		// Create reservation
@@ -159,7 +163,7 @@ func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
 			"payment": fiber.Map{
 				"payment_address": reservation.MerchantWallet,
 				"network":         "BSC",
-				"amount_USDT":     totalUSD,
+				"amount_USDT":     float64(int64(totalUSD*1000000)) / 1000000, // Limit to 6 decimal places for USDT precision
 				"amount_IDR":      totalIDR,
 				"token":           "USDT",
 				"token_address":   "0xCD60747D9Bbb1da2AfB2F834391f0FF6ccb15f1a",
@@ -232,5 +236,109 @@ func (r *ReservationRoutes) UpdateReservation(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(&fiber.Map{
 		"message":     "Reservation updated successfully",
 		"reservation": reservation,
+	})
+}
+
+func (r *ReservationRoutes) ManualVerification(c *fiber.Ctx) error {
+	type ManualVerificationRequest struct {
+		ReservationID   uint   `json:"reservation_id"`
+		TransactionHash string `json:"transaction_hash"`
+	}
+
+	req := ManualVerificationRequest{}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Invalid request body",
+			"error":   err.Error(),
+		})
+	}
+	// create code for manual verficcation, user passes transaction hash,
+	// we check to bsc testnet if the transaction is valid
+	// and update reservation status accordingly
+	reservation := models.Reservation{}
+	if err := r.DB.First(&reservation, "id = ?", req.ReservationID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"message": "Reservation not found",
+			"error":   err.Error(),
+		})
+	}
+
+	url := "https://bnb-testnet.g.alchemy.com/v2/51MRDeFHeLtd5FrWrTMv0bsusLfs5n8r"
+	// check if transaction hash is valid
+	client, err := ethclient.Dial(url)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": "Failed to connect to RPC",
+			"error":   err.Error(),
+		})
+	}
+	defer client.Close()
+	tx, err := client.TransactionReceipt(context.Background(), common.HexToHash(req.TransactionHash))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": "Failed to fetch transaction receipt",
+			"error":   err.Error(),
+		})
+	}
+
+	// check if transaction is valid
+	if tx == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Invalid transaction hash",
+			"error":   "Transaction not found",
+		})
+	}
+
+	// check if transaction is from merchant wallet
+	transaction, isPending, err := client.TransactionByHash(context.Background(), common.HexToHash(req.TransactionHash))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": "Failed to fetch transaction",
+			"error":   err.Error(),
+		})
+	}
+
+	from, err := client.TransactionSender(context.Background(), transaction, tx.BlockHash, tx.TransactionIndex)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": "Failed to get transaction sender",
+			"error":   err.Error(),
+		})
+	}
+
+	if from != common.HexToAddress(reservation.MerchantWallet) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Invalid transaction sender",
+			"error":   "Transaction sender is not the merchant wallet",
+		})
+	}
+
+	// check if transaction is pending
+	if isPending {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Invalid transaction",
+			"error":   "Transaction is pending",
+		})
+	}
+
+	// check if transaction is successful
+	if tx.Status != 1 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Invalid transaction",
+			"error":   "Transaction failed",
+		})
+	}
+
+	// update reservation status
+	reservation.PaymentStatus = "PAID"
+	if err := r.DB.Save(&reservation).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": "Failed to update reservation status",
+			"error":   err.Error(),
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message": "Reservation verified successfully",
 	})
 }

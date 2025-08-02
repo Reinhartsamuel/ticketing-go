@@ -2,6 +2,7 @@ package routes
 
 import (
 	"Repos/ticketing-go/models"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -29,6 +30,9 @@ func (cr *CustomerRoutes) CreateCustomer(c *fiber.Ctx) error {
 			"error":   err.Error(),
 		})
 	}
+
+	// Convert wallet_address to lowercase
+	customer.WalletAddress = strings.ToLower(customer.WalletAddress)
 
 	// Create customer record
 	if err := cr.DB.Create(&customer).Error; err != nil {

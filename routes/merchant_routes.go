@@ -4,6 +4,7 @@ import (
 	"Repos/ticketing-go/models"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -30,6 +31,8 @@ func (m *MerchantRoutes) CreateMerchant(c *fiber.Ctx) error {
 			"error":   err.Error(),
 		})
 	}
+	// Convert wallet_address to lowercase
+	merchant.MerchantWallet = strings.ToLower(merchant.MerchantWallet)
 
 	// Dynamic validation
 	requiredFields := map[string]string{
