@@ -1,4 +1,4 @@
-# Ticketing System Go REST API with Crypto Payment Validation (BSC Testnet)
+# Ticketing System Go REST API with Crypto Payment Validation (BSC Testnet) [main branch: DEV]
 
 
 > Go REST API using **FIBER** (gofiber.io) and Crypto Payment Validation. This is for SerMorpheus Software Engineer Assessment.
