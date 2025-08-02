@@ -256,42 +256,6 @@ Before getting started, ensure you have the following installed:
 - [Git](https://git-scm.com/downloads)
 
 
-✅ **Minimalist Design** – Lightweight codebase, easy to integrate  
-🌐 **Lisk-Powered** – Leverage the scalable and developer-friendly Lisk chain  
-💰 **Accept IDRX** – Tap into Indonesia’s booming crypto economy with an IDR-pegged token  
-⚡ **Fast & Secure** – Instant transaction verification + battle-tested smart contracts  
-🧑‍💻 **Developer First** – Simple APIs, clear documentation, and modular architecture  
-🌱 **Open Source** – Because transparency matters  
-
-
-
-## 🛠️ GENERAL WORKFLOW
-
-### 1. Connect Wallet on Omnium
-Open https://omnium-pg.vercel.app/, then connect wallet. You can use email, or metamask
-
-### 2. Get API key
-Generate api key on Merchant dashboard
-
-### 3. Get API key on Merchant Dashboard
-Navigate to API Keys section, click Create New Api Key
-### 3. Make a test payment
-Use our Postman collection or send a POST request:
-
-METHOD : POST 
-
-```
-{
-	"data" : {
-	"seller":"0x753dFC03b4d37B3a316D0Fe5aB9F677C0D3C20f8",
-	"product":"Nike air jordan",
-	"quantity":"2",
-	"price" : 1000000,
-	"callbackUrl":"https://your-backend.com/"
- }
-}
-```
-
 📧 Email: [reinhartsams@gmail.com]  
 🐦 Twitter: [@reyyn_hart]  
 💬 Telegram: [t.me/reinhartsamuel]  
