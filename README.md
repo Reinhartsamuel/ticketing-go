@@ -262,6 +262,4 @@ Before getting started, ensure you have the following installed:
 
 ---
 
-✨ **Omnium** – Where simplicity meets power in crypto payments.  
-🚀 Accept IDRX today. On Lisk. For everyone.
 
