@@ -1,6 +1,7 @@
-package main
+package workers
 
 import (
+	"Repos/ticketing-go/models"
 	"context"
 	"log"
 	"math/big"
@@ -11,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"gorm.io/gorm"
 )
 
 // Standard ERC20 Transfer event ABI
@@ -21,12 +23,13 @@ const transferABI = `[{"anonymous":false,"inputs":[
 	"name":"Transfer","type":"event"}]`
 
 var (
-	usdcAddress  = common.HexToAddress("0xfA02ee4D1B9D8316f4682F71e3E26bD00f0eCF3e") // Example: USDC on Arbitrum Sepolia
-	rpcURL       = "https://sepolia-rollup.arbitrum.io/rpc"
-	pollInterval = 15 * time.Second // Adjust as needed
+	usdtAddress  = common.HexToAddress("0xCD60747D9Bbb1da2AfB2F834391f0FF6ccb15f1a") // USDT on BSC testnet
+	rpcURL       = "https://bnb-testnet.g.alchemy.com/v2/51MRDeFHeLtd5FrWrTMv0bsusLfs5n8r"
+	pollInterval = 15 * time.Second
 )
 
-func main() {
+func StartVerificationPoller(db *gorm.DB) {
+	log.Println("🚀 Poller started")
 	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to RPC: %v", err)
@@ -67,7 +70,7 @@ func main() {
 			query := ethereum.FilterQuery{
 				FromBlock: big.NewInt(int64(block)),
 				ToBlock:   big.NewInt(int64(block)),
-				Addresses: []common.Address{usdcAddress},
+				Addresses: []common.Address{usdtAddress},
 				Topics:    [][]common.Hash{{transferSigHash}},
 			}
 
@@ -85,18 +88,34 @@ func main() {
 				from := common.HexToAddress(vLog.Topics[1].Hex())
 				to := common.HexToAddress(vLog.Topics[2].Hex())
 
-				var amount big.Int
-				err := parsedABI.UnpackIntoInterface(&amount, "Transfer", vLog.Data)
+				var unpacked []any
+				unpacked, err := parsedABI.Unpack("Transfer", vLog.Data)
 				if err != nil {
-					log.Printf("Error unpacking value: %v", err)
+					log.Printf("❌ Error unpacking value: %v", err)
+					continue
+				}
+				amount, ok := unpacked[0].(*big.Int)
+				if !ok {
+					log.Printf("❌ Error unpacking value: %v", unpacked[0])
 					continue
 				}
 
-				// 🔍 Replace this with your actual Redis or DB check
-				if isMonitoredAddress(to) {
-					log.Printf("🔔 Payment Detected: from %s to %s, amount %s", from.Hex(), to.Hex(), amount.String())
-					// Update DB / Redis payment status here
-				}
+				log.Println("📦 Detected USDT Transfer")
+				log.Printf("   ├─ From   : %s", from.Hex())
+				log.Printf("   ├─ To     : %s", to.Hex())
+				log.Printf("   └─ Amount : %s (raw wei)", amount.String())
+
+				// OPTIONAL: Convert to float if needed
+				// amtFloat := new(big.Float).Quo(new(big.Float).SetInt(&amount), big.NewFloat(1e18))
+				// log.Printf("   └─ Amount : %f USDT", amtFloat)
+
+				// If you're just testing, comment out DB logic
+				// match, err := CheckExpectedPayment(db, to.Hex(), &amount)
+				// if err != nil {
+				// 	 log.Printf("❌ DB error: %v", err)
+				// } else if match {
+				// 	 log.Printf("✅ Matched expected payment for: %s", to.Hex())
+				// }
 			}
 		}
 
@@ -104,11 +123,70 @@ func main() {
 	}
 }
 
-// Dummy address checker
-func isMonitoredAddress(addr common.Address) bool {
-	// Replace with actual Redis or database check
-	monitored := map[string]bool{
-		"0x1234567890abcdef1234567890abcdef12345678": true,
+func CheckExpectedPayment(db *gorm.DB, to string, amount *big.Int) (bool, error) {
+	// Do the DB lookup here
+	var count int64
+	err := db.Table("expected_payments").
+		Where("lower(expected_to_address) = lower(?)", to).
+		Where("expected_amount = ?", amount.String()).
+		Where("paid = FALSE AND expires_at > now()").
+		Count(&count).Error
+
+	if err != nil {
+		return false, err
 	}
-	return monitored[strings.ToLower(addr.Hex())]
+	if count > 0 {
+		// mark as paid
+		err := db.Exec(`
+			UPDATE expected_payments
+			SET paid = TRUE, paid_at = now()
+			WHERE lower(expected_to_address) = lower(?)
+				AND expected_amount = ?
+				AND paid = FALSE AND expires_at > now()
+			LIMIT 1
+		`, to, amount.String()).Error
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func StartReservationsPoller(db *gorm.DB) {
+	log.Println("🚀 Reservations poller started")
+
+	// get all from Reservations table where payment due is passed
+	// payment due <= now()
+	var reservations []models.Reservation
+	err := db.Where("payment_due <= now()").Find(&reservations).Error
+	if err != nil {
+		log.Printf("❌ Error fetching reservations: %v", err)
+		return
+	}
+
+	// update record to payment status == EXPIRED and return the hold ticket quota back
+	// to events table
+	// for _, reservation := range reservations {
+	// 	err := db.Model(&reservation).Updates(models.Reservation{
+	// 		PaymentStatus: "EXPIRED",
+	// 	}).Error
+	// 	if err != nil {
+	// 		log.Printf("❌ Error updating reservation: %v", err)
+	// 		continue
+	// 	}
+	// 	// return the hold ticket quota back to events table
+	// 	var event models.Event
+	// 	err = db.First(&event, reservation.EventID).Error
+	// 	if err != nil {
+	// 		log.Printf("❌ Error fetching event: %v", err)
+	// 		continue
+	// 	}
+	// 	event.HoldTicketQuota += 1
+	// 	err = db.Save(&event).Error
+	// 	if err != nil {
+	// 		log.Printf("❌ Error updating event: %v", err)
+	// 		continue
+	// 	}
+	// }
 }

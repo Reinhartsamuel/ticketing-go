@@ -17,6 +17,7 @@ type Event struct {
 	MerchantID        uint           `json:"merchant_id"`
 	PriceIdr          float64        `json:"price_idr"`
 	EventTicketAmount int            `json:"event_ticket_amount"`
+	TicketType        string         `json:"ticket_type" gorm:"default:REGULAR"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"index;column:deleted_at"`

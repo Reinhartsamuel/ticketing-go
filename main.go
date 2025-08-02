@@ -4,6 +4,9 @@ import (
 	"Repos/ticketing-go/migrations"
 	"Repos/ticketing-go/routes"
 	"Repos/ticketing-go/storage"
+	"Repos/ticketing-go/workers"
+
+	// "Repos/ticketing-go/workers"
 	"log"
 	"os"
 
@@ -49,6 +52,9 @@ func main() {
 	if err != nil {
 		log.Fatal("Error connecting to database:", err.Error())
 	}
+
+	// ✅ Start poller in the background
+	go workers.StartVerificationPoller(db)
 
 	err = migrations.MigrateAll(db)
 	if err != nil {

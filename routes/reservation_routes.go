@@ -26,127 +26,145 @@ func (r *ReservationRoutes) SetupRoutes(app *fiber.App) {
 }
 
 func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
-	type ReservationRequest struct {
-		UserID    uint `json:"user_id"`
+	type ReservationItemRequest struct {
 		EventID   uint `json:"event_id"`
 		TicketQty int  `json:"ticket_qty"`
 	}
 
+	type ReservationRequest struct {
+		UserID uint                     `json:"user_id"`
+		Items  []ReservationItemRequest `json:"items"`
+	}
+
 	req := ReservationRequest{}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.BodyParser(&req); err != nil || len(req.Items) == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"message": "Invalid request body",
-			"error":   err.Error(),
 		})
 	}
 
-	// Basic input validation
-	if req.UserID == 0 || req.EventID == 0 || req.TicketQty <= 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "Missing or invalid user_id, event_id, or ticket_qty",
-		})
+	// Fetch exchange rate early
+	apiKey := os.Getenv("EXCHANGE_RATES_API_KEY")
+	url := fmt.Sprintf("https://v6.exchangerate-api.com/v6/%s/pair/USD/IDR", apiKey)
+
+	exchangeRate := 16500.0 // fallback
+	resp, err := http.Get(url)
+	if err == nil {
+		defer resp.Body.Close()
+		var body struct {
+			Result         string  `json:"result"`
+			ConversionRate float64 `json:"conversion_rate"`
+		}
+		data, _ := io.ReadAll(resp.Body)
+		_ = json.Unmarshal(data, &body)
+		if body.Result == "success" {
+			exchangeRate = body.ConversionRate
+		}
 	}
 
-	err := r.DB.Transaction(func(tx *gorm.DB) error {
-		// Lock the event row FOR UPDATE
-		var event models.Event
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ?", req.EventID).
-			First(&event).Error; err != nil {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-				"message": "Event not found",
-			})
+	err = r.DB.Transaction(func(tx *gorm.DB) error {
+		// Fetch customer
+		var customer models.Customer
+		if err := tx.First(&customer, req.UserID).Error; err != nil {
+			return fmt.Errorf("customer not found")
 		}
 
-		// Validate event timing
-		if event.EventDate.Before(time.Now()) {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "Cannot reserve ticket for past events",
-			})
-		}
+		var totalIDR, totalUSD float64
+		var items []models.ReservationItem
+		var merchantWallet string
+		seenMerchants := make(map[uint]bool)
 
-		// Validate ticket quota
-		if event.EventTicketAmount < req.TicketQty {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": fmt.Sprintf("Only %d tickets left", event.EventTicketAmount),
-			})
-		}
-
-		// Deduct ticket amount
-		event.EventTicketAmount -= req.TicketQty
-		if err := tx.Save(&event).Error; err != nil {
-			return fmt.Errorf("failed to update event quota: %w", err)
-		}
-
-		// Fetch merchant wallet from the event
-		var merchant models.Merchant
-		if err := tx.Where("id = ?", event.MerchantID).First(&merchant).Error; err != nil {
-			return fmt.Errorf("failed to fetch merchant: %w", err)
-		}
-
-		// Declare priceUsd variable at function scope
-		var priceUsd float64
-
-		// Fetch and parse exchange rate from EXCHANGERATE API
-		apiKey := os.Getenv("EXCHANGE_RATES_API_KEY")
-		url := fmt.Sprintf("https://v6.exchangerate-api.com/v6/%s/pair/USD/IDR", apiKey)
-		resp, err := http.Get(url)
-		if err != nil {
-			// Fallback to hardcoded rate if API request fails
-			priceUsd = event.PriceIdr / 16500
-		} else {
-			bodyBytes, err := io.ReadAll(resp.Body)
-			if err != nil {
-				priceUsd = event.PriceIdr / 16500
-			} else {
-				fmt.Println(string(bodyBytes)) // Print actual response content
-
-				var rateData struct {
-					Result         string  `json:"result"`
-					ConversionRate float64 `json:"conversion_rate"`
-				}
-
-				if err := json.Unmarshal(bodyBytes, &rateData); err != nil {
-					fmt.Println("Decode error:", err)
-					priceUsd = event.PriceIdr / 16500
-				} else if rateData.Result != "success" {
-					fmt.Println("API returned non-success result")
-					priceUsd = event.PriceIdr / 16500
-				} else {
-					priceUsd = event.PriceIdr / rateData.ConversionRate
-				}
+		for _, i := range req.Items {
+			if i.EventID == 0 || i.TicketQty <= 0 {
+				return fmt.Errorf("invalid event_id or ticket_qty")
 			}
+
+			var event models.Event
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id = ?", i.EventID).
+				First(&event).Error; err != nil {
+				return fmt.Errorf("event %d not found", i.EventID)
+			}
+			var merchant models.Merchant
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id = ?", event.MerchantID).
+				First(&merchant).Error; err != nil {
+				return fmt.Errorf("merchant %d not found", event.MerchantID)
+			}
+
+			if event.EventDate.Before(time.Now()) {
+				return fmt.Errorf("event %d has already occurred", i.EventID)
+			}
+
+			if event.EventTicketAmount < i.TicketQty {
+				return fmt.Errorf("event %d only has %d tickets left", i.EventID, event.EventTicketAmount)
+			}
+
+			event.EventTicketAmount -= i.TicketQty
+			if err := tx.Save(&event).Error; err != nil {
+				return err
+			}
+
+			// Prevent mixing different merchants in a single reservation
+			if _, ok := seenMerchants[event.MerchantID]; !ok && len(seenMerchants) > 0 {
+				return fmt.Errorf("cannot reserve tickets from multiple merchants in one reservation")
+			}
+			seenMerchants[event.MerchantID] = true
+			merchantWallet = merchant.MerchantWallet
+
+			priceIDR := float64(i.TicketQty) * event.PriceIdr
+			priceUSD := priceIDR / exchangeRate
+
+			item := models.ReservationItem{
+				EventID:      i.EventID,
+				TicketTypeID: 0,
+				Quantity:     uint(i.TicketQty),
+				PriceIdr:     priceIDR,
+				PriceUsd:     priceUSD,
+			}
+			items = append(items, item)
+
+			totalIDR += priceIDR
+			totalUSD += priceUSD
 		}
-		// Build reservation
+
+		// Create reservation
 		reservation := models.Reservation{
 			UserID:           req.UserID,
-			EventID:          req.EventID,
 			PaymentStatus:    "PENDING",
+			PaymentAmountUsd: totalUSD,
+			PaymentAmountIdr: totalIDR,
 			PaymentDue:       time.Now().Add(1 * time.Hour),
-			PaymentAmountUsd: float64(req.TicketQty) * priceUsd,       // assuming Event.PriceUsd exists
-			PaymentAmountIdr: float64(req.TicketQty) * event.PriceIdr, // assuming Event.PriceIdr exists
-			MerchantWallet:   merchant.MerchantWallet,
+			MerchantWallet:   merchantWallet,
+			CustomerWallet:   customer.WalletAddress,
 		}
 
 		if err := tx.Create(&reservation).Error; err != nil {
-			return fmt.Errorf("failed to create reservation: %w", err)
+			return err
 		}
 
-		// Send response including merchant wallet
+		for i := range items {
+			items[i].ReservationID = reservation.ID
+		}
+		if err := tx.Create(&items).Error; err != nil {
+			return err
+		}
+		var reservationWithItems models.Reservation
+		if err := tx.Preload("ReservationItems").First(&reservationWithItems, reservation.ID).Error; err != nil {
+			return err
+		}
 		c.Status(fiber.StatusCreated).JSON(fiber.Map{
 			"message":     "Reservation created",
-			"reservation": reservation,
-			// "wallet":      merchant.MerchantWallet,
-			// "network" : "BSC",
+			"reservation": reservationWithItems,
 			"payment": fiber.Map{
-				"payment_address": merchant.MerchantWallet,
+				"payment_address": reservation.MerchantWallet,
 				"network":         "BSC",
-				"amount_USDT":     float64(req.TicketQty) * priceUsd,
-				"amount_IDR":      float64(req.TicketQty) * event.PriceIdr,
+				"amount_USDT":     totalUSD,
+				"amount_IDR":      totalIDR,
 				"token":           "USDT",
 				"token_address":   "0xCD60747D9Bbb1da2AfB2F834391f0FF6ccb15f1a",
 				"token_standard":  "BEP20",
-				"chain_id":        97, // BSC testnet
+				"chain_id":        97,
 				"payment_due":     reservation.PaymentDue,
 			},
 		})
@@ -154,11 +172,8 @@ func (r *ReservationRoutes) CreateReservation(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
-		if err, ok := err.(*fiber.Error); ok {
-			return err
-		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"message": "Transaction failed",
+			"message": "Reservation failed",
 			"error":   err.Error(),
 		})
 	}
