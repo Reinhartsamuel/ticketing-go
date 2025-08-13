@@ -8,19 +8,19 @@
 
 I come from Node JS for all my stacks, and after some research I found Fiber which is very similar to Express.js so that means it's more simpler, more modular and familiar for me compared to Gin to work on. It's fast, and very lightweight in terms of memory usage.
 
-All deployment is using Railway, 
+All deployment is using Railway,
 
 ### 💡 Assumptions
 The ticketing system is assumed to be some kind of **Ticketing Marketplace**, where:
 
 	1. There are Merchants.
-	2. There are two types of Customers, one is regular customer (who buys) and 
+	2. There are two types of Customers, one is regular customer (who buys) and
 	    the other is merchant owner (who sells). For the purpose of this assessment, sellers
 		have one-to-one relationship with their wallet addresses. Later, we should implement
 		one-to-many between customers and wallets.
 	3. Merchant can create events, with predefined ticket type, ticket price, date, and quota
 	4. Customer/buyers can purchase more than one event's tickets in a single purchase
-	5. In the assessment guides, stated "A valid transaction will reduce the ticket 
+	5. In the assessment guides, stated "A valid transaction will reduce the ticket
 	    quota by the purchased amount.". But, to better handle race-condition scenarios,
 	    on user purchase, quantity is directly deducted and treated as 'Pending
 	    Reservation'.
@@ -28,24 +28,12 @@ The ticketing system is assumed to be some kind of **Ticketing Marketplace**, wh
 	    determine whether quota is successfully paid, or, rolled back to available quota.
 	7. Currency conversions between price in USD and IDR uses external API, and with the
 	    assumption where 1 fiat USD === 1 $USDT (never depegs).
-	8. Payment Verification implements hybrid system : POLLING and MANUAL CONFIRMATION. 
+	8. Payment Verification implements hybrid system : POLLING and MANUAL CONFIRMATION.
 	    Details to be explained below.
 ---
 
 ![Flowchart](docs/flowchart.png)
 
-## ENV
-```
-DB_HOST=crossover.proxy.rlwy.net
-DB_PORT=19895
-DB_NAME=railway
-DB_USER=postgres
-DB_PASS=NoYbZJXQNODCRWKvmRmeyexLRfvEuadM
-SSL_MODE=disable
-EXCHANGE_RATES_API_KEY=94bb708b5963b2b9ee364fe9
-EXCHANGE_RATE_URL=https://v6.exchangerate-api.com/v6/94bb708b5963b2b9ee364fe9/pair/USD/IDR
-ETHERSCAN_API_KEY=V73FC241WQ8W3R6RR6V3JPCS9XGM8XK7E2
-```
 ## API Reference
 
 #### Create Customer
@@ -249,7 +237,7 @@ PATCH /reservations
 Before getting started, ensure you have the following installed:
 
 - [Go](https://go.dev/doc/install) (version 1.20 or higher)
-- [PostgreSQL](https://www.postgresql.org/download/) (version 12 or higher) and [psql](https://www.postgresql.org/docs/current/app-psql.html) 
+- [PostgreSQL](https://www.postgresql.org/download/) (version 12 or higher) and [psql](https://www.postgresql.org/docs/current/app-psql.html)
 - [gorm](gorm.io/gorm)
 - [Etherscan API KEY](https://etherscan.io/)
 - [exchangerate-api](https://v6.exchangerate-api.com/v6/94bb708b5963b2b9ee364fe9/pair/USD/IDR)
@@ -279,10 +267,8 @@ Start the server
   go run main.go
 ```
 
-📧 Email: [reinhartsams@gmail.com]  
-🐦 Twitter: [@reyyn_hart]  
-💬 Telegram: [t.me/reinhartsamuel]  
+📧 Email: [reinhartsams@gmail.com]
+🐦 Twitter: [@reyyn_hart]
+💬 Telegram: [t.me/reinhartsamuel]
 
 ---
-
-
