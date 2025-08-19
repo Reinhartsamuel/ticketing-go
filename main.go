@@ -1,25 +1,25 @@
 package main
 
 import (
+	"log"
+	"os"
+
 	"Repos/ticketing-go/migrations"
 	"Repos/ticketing-go/routes"
 	"Repos/ticketing-go/storage"
 	"Repos/ticketing-go/workers"
 
-	// "Repos/ticketing-go/workers"
-	"log"
-	"os"
-
 	"github.com/gofiber/fiber/v2"
-	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
+// Repository struct to hold the database connection
 type Repository struct {
 	DB *gorm.DB
 }
 
+// SetupRoutes initializes all the route handlers and sets up the application routes.
 func (r *Repository) SetupRoutes(app *fiber.App) {
 	// Initialize route handlers
 	merchantRoutes := &routes.MerchantRoutes{DB: r.DB}
@@ -34,12 +34,16 @@ func (r *Repository) SetupRoutes(app *fiber.App) {
 	reservationRoutes.SetupRoutes(app)
 }
 
+// main function to start the application
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading environment variables:", err.Error())
-	}
+	// ❌ Removed the line that loads the .env file.
+	// err := godotenv.Load()
+	// if err != nil {
+	// 	log.Fatal("Error loading environment variables:", err.Error())
+	// }
 
+	// Get environment variables directly from the system environment
+	// Railway automatically injects these from the dashboard.
 	config := &storage.Config{
 		Host:    os.Getenv("DB_HOST"),
 		Port:    os.Getenv("DB_PORT"),
@@ -48,6 +52,12 @@ func main() {
 		Pass:    os.Getenv("DB_PASS"),
 		SSLMode: os.Getenv("SSL_MODE"),
 	}
+
+	// Check if any of the critical environment variables are missing
+	if config.Host == "" || config.Port == "" || config.Name == "" || config.User == "" || config.Pass == "" {
+		log.Fatal("Error: One or more database environment variables are not set. Check your Railway dashboard.")
+	}
+
 	db, err := storage.NewConnection(config)
 	if err != nil {
 		log.Fatal("Error connecting to database:", err.Error())
@@ -64,5 +74,11 @@ func main() {
 
 	app := fiber.New()
 	r.SetupRoutes(app)
-	app.Listen(":3000")
+
+	// Start the Fiber application on the port provided by Railway
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3000" // Default port if not set
+	}
+	log.Fatal(app.Listen(":" + port))
 }
