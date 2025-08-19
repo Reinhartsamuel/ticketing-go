@@ -64,7 +64,7 @@ func main() {
 	}
 
 	// ✅ Start poller in the background
-	go workers.StartVerificationPoller(db)
+	// go workers.StartVerificationPoller(db)
 
 	err = migrations.MigrateAll(db)
 	if err != nil {
