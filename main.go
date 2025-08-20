@@ -7,7 +7,7 @@ import (
 	"Repos/ticketing-go/migrations"
 	"Repos/ticketing-go/routes"
 	"Repos/ticketing-go/storage"
-	"Repos/ticketing-go/workers"
+	// "Repos/ticketing-go/workers"
 
 	"github.com/gofiber/fiber/v2"
 	_ "github.com/lib/pq"
